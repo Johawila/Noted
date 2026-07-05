@@ -28,6 +28,15 @@ struct CaptureView: View {
         return tagManager.suggestions(for: prefix, partial: partial)
     }
 
+    // Non-nil when the input is a single bare URL — switches Return to "ingest article".
+    private var detectedArticleURL: String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(" "), !trimmed.contains("\n"),
+              trimmed.lowercased().hasPrefix("http"),
+              let url = URL(string: trimmed), url.host != nil else { return nil }
+        return trimmed
+    }
+
     var body: some View {
         VStack(spacing: 0) {
 
@@ -67,6 +76,11 @@ struct CaptureView: View {
                     .onKeyPress(keys: [.return]) { press in
                         if !activeSuggestions.isEmpty {
                             completeTag(with: activeSuggestions[selectedSuggestionIndex].name)
+                            return .handled
+                        }
+                        if let url = detectedArticleURL, !press.modifiers.contains(.option) {
+                            ArticleIngestService.shared.ingest(urlString: url)
+                            onDismiss()
                             return .handled
                         }
                         if press.modifiers.contains(.shift) {
@@ -137,6 +151,11 @@ struct CaptureView: View {
                         }
                         .foregroundStyle(.green)
                         .transition(.opacity)
+                    } else if detectedArticleURL != nil {
+                        Text("↵ ingest article  ·  ⌥↵ save link  ·  esc cancel")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color(white: 0.55))
+                            .transition(.opacity)
                     } else {
                         Text("↵ save  ·  ⇧↵ keep open  ·  esc cancel")
                             .font(.system(size: 11))
@@ -223,11 +242,11 @@ struct CaptureView: View {
     }
 
     private func completeTag(with name: String) {
-        guard let (prefix, _) = TagParser.activeTag(in: text) else { return }
-        let words = text.components(separatedBy: " ")
-        let tagValue = name.replacingOccurrences(of: " ", with: "\u{00A0}")
-        let completed = words.dropLast() + ["\(prefix)\(tagValue)"]
-        text = completed.joined(separator: " ") + " "
+        guard let (prefix, _) = TagParser.activeTag(in: text),
+              let sigil = text.range(of: prefix, options: .backwards) else { return }
+        // Quote multi-word names so the parser keeps them as one tag; single words stay bare.
+        let tag = name.contains(" ") ? "\(prefix)\"\(name)\"" : "\(prefix)\(name)"
+        text = String(text[..<sigil.lowerBound]) + tag + " "
     }
 
     private func submit() {
