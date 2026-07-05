@@ -14,17 +14,13 @@ class TagManager: ObservableObject {
     @Published var projects: [TagInfo] = []
     @Published var people: [TagInfo] = []
 
-    private let baseURL = "https://api.notion.com/v1"
-    private let notionVersion = "2022-06-28"
+    private var vaultPath: String { UserDefaults.standard.string(forKey: "vaultPath") ?? "" }
 
-    private var apiKey: String { UserDefaults.shared.string(forKey: "notionApiKey") ?? "" }
-    private var projectsDbId: String { UserDefaults.shared.string(forKey: "hivemind.projectsDbId") ?? "" }
-    private var peopleDbId: String { UserDefaults.shared.string(forKey: "hivemind.peopleDbId") ?? "" }
-
+    // Autocomplete is sourced from the Obsidian vault: #project ← Organisation/Projects,
+    // @person ← Organisation/People (one markdown file per entity).
     func fetchAll() async {
-        async let p = fetchTagInfos(databaseId: projectsDbId)
-        async let pe = fetchTagInfos(databaseId: peopleDbId)
-        let (projects, people) = await (p, pe)
+        let projects = readNames(folder: "Organisation/Projects")
+        let people = readNames(folder: "Organisation/People")
         await MainActor.run {
             self.projects = projects
             self.people = people
@@ -45,30 +41,14 @@ class TagManager: ObservableObject {
 
     // MARK: - Private
 
-    private func fetchTagInfos(databaseId: String) async -> [TagInfo] {
-        guard !databaseId.isEmpty, !apiKey.isEmpty else { return [] }
-
-        let url = URL(string: "\(baseURL)/databases/\(databaseId)/query")!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue(notionVersion, forHTTPHeaderField: "Notion-Version")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: [:])
-
-        guard let (data, _) = try? await URLSession.shared.data(for: request),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let results = json["results"] as? [[String: Any]] else { return [] }
-
-        return results.compactMap { page -> TagInfo? in
-            let props = page["properties"] as? [String: Any]
-            let nameProp = props?["Name"] as? [String: Any]
-            let titleArr = nameProp?["title"] as? [[String: Any]]
-            guard let name = titleArr?.first?["plain_text"] as? String else { return nil }
-            let colorProp = props?["Color"] as? [String: Any]
-            let color = (colorProp?["select"] as? [String: Any])?["name"] as? String ?? ""
-            return TagInfo(name: name, color: color)
-        }
+    private func readNames(folder: String) -> [TagInfo] {
+        guard !vaultPath.isEmpty else { return [] }
+        let dir = URL(fileURLWithPath: vaultPath).appendingPathComponent(folder)
+        guard let items = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return [] }
+        return items
+            .filter { $0.pathExtension == "md" }
+            .map { TagInfo(name: $0.deletingPathExtension().lastPathComponent, color: "") }
+            .sorted { $0.name < $1.name }
     }
 }
 

@@ -2,6 +2,10 @@ import Foundation
 import AppKit
 import UserNotifications
 
+// Writes quick captures into the SecondBrain Obsidian vault:
+//  - the day's note at Journal/YYYY-MM-DD.md (## Tasks / ## Notes)
+//  - #project → [[Project]], @person → [[Organisation/People/Name|Name]]
+//  - a capture tagged @person is ALSO copied onto that person's page (## Notes).
 class ObsidianBackend: JournalBackend {
     static let shared = ObsidianBackend()
     private init() {}
@@ -31,29 +35,138 @@ class ObsidianBackend: JournalBackend {
             await MainActor.run { promptForVault() }
             return
         }
+        let vault = URL(fileURLWithPath: vaultPath)
+        let entry = TagParser.parse(text)
+        let wikified = wikify(text)
 
-        let today = todayDateString()
-        let journalFolder = URL(fileURLWithPath: vaultPath).appendingPathComponent("Journal")
-        let fileURL = journalFolder.appendingPathComponent("\(today).md")
-
-        try FileManager.default.createDirectory(at: journalFolder, withIntermediateDirectories: true)
-
-        var content: String
-        if let existing = try? String(contentsOf: fileURL, encoding: .utf8) {
-            content = existing
-        } else {
-            content = buildTemplate(dateStr: today)
+        try appendToDaily(vault: vault, wikified: wikified, type: type)
+        for person in entry.people {
+            try appendToEntity(vault: vault, folder: "Organisation/People", name: person, wikified: wikified, type: type, template: personTemplate(person))
         }
-
-        let line = type == .task ? "- [ ] \(text)" : text
-        let section = type == .task ? "## Tasks" : "### Notes"
-        content = insertAfterHeader(content: content, header: section, newLine: line)
-
-        try content.write(to: fileURL, atomically: true, encoding: .utf8)
+        for project in entry.projects {
+            try appendToEntity(vault: vault, folder: "Organisation/Projects", name: project, wikified: wikified, type: type, template: projectTemplate(project))
+        }
         notify(text: text, type: type)
     }
 
-    // MARK: - Private
+    // MARK: - Daily note
+
+    private func appendToDaily(vault: URL, wikified: String, type: CaptureType) throws {
+        let today = todayDateString()
+        let folder = vault.appendingPathComponent("Journal")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let fileURL = folder.appendingPathComponent("\(today).md")
+
+        var content = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? dailyTemplate(today)
+        let line = type == .task ? "- [ ] \(wikified)" : "- \(wikified)"
+        let header = type == .task ? "## Tasks" : "## Notes"
+        content = insertAfterHeader(content: content, header: header, newLine: line)
+        try content.write(to: fileURL, atomically: true, encoding: .utf8)
+    }
+
+    // MARK: - Person page (dual-write)
+
+    // Ensures an entity page (person or project) exists, creating it from `template` if not.
+    // Notes are mirrored as a dated bullet under ## Notes. Tasks are NOT copied here — the
+    // page's ## Tasks Dataview block surfaces them live from the Journal (single source of
+    // truth, no checkbox drift), so a task capture only guarantees the page exists.
+    private func appendToEntity(vault: URL, folder: String, name: String, wikified: String, type: CaptureType, template: String) throws {
+        let dir = vault.appendingPathComponent(folder)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fileURL = dir.appendingPathComponent("\(fileSafe(name)).md")
+        let exists = FileManager.default.fileExists(atPath: fileURL.path)
+
+        if type == .task {
+            if !exists { try template.write(to: fileURL, atomically: true, encoding: .utf8) }
+            return
+        }
+
+        var content = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? template
+        let line = "- \(todayDateString()) — \(wikified)"
+        content = insertAfterHeader(content: content, header: "## Notes", newLine: line)
+        try content.write(to: fileURL, atomically: true, encoding: .utf8)
+    }
+
+    // MARK: - Tag → wikilink
+
+    private func wikify(_ text: String) -> String {
+        TagParser.tokenize(text).map { token in
+            switch token {
+            case .text(let t): return t
+            case .person(let name): return "[[Organisation/People/\(fileSafe(name))|\(name)]]"
+            case .project(let name): return "[[\(fileSafe(name))]]"
+            }
+        }.joined()
+    }
+
+    // MARK: - Templates / helpers
+
+    private func dailyTemplate(_ dateStr: String) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        let display = DateFormatter(); display.dateFormat = "EEEE, MMMM d, yyyy"
+        let title = f.date(from: dateStr).map { display.string(from: $0) } ?? dateStr
+        return """
+        # \(title)
+
+        ## Tasks
+
+        ## Notes
+        """
+    }
+
+    private func personTemplate(_ name: String) -> String {
+        """
+        ---
+        role:
+        tags: []
+        manager:
+        company:
+        ---
+
+        # \(name)
+
+        ## 1:1 log
+
+        ## Tasks
+        ```dataview
+        TASK FROM "Journal" WHERE contains(outlinks, this.file.link)
+        ```
+
+        ## Notes
+
+        ## Mentioned in
+        ```dataview
+        LIST WHERE contains(file.outlinks, this.file.link)
+        ```
+        """
+    }
+
+    private func projectTemplate(_ name: String) -> String {
+        """
+        ---
+        status:
+        ---
+
+        # \(name)
+
+        ## Tasks
+        ```dataview
+        TASK FROM "Journal" WHERE contains(outlinks, this.file.link)
+        ```
+
+        ## Notes
+
+        ## Mentioned in
+        ```dataview
+        LIST WHERE contains(file.outlinks, this.file.link)
+        ```
+        """
+    }
+
+    private func fileSafe(_ name: String) -> String {
+        name.components(separatedBy: CharacterSet(charactersIn: "/\\:*?\"<>|")).joined(separator: "-")
+            .trimmingCharacters(in: .whitespaces)
+    }
 
     private func notify(text: String, type: CaptureType) {
         let content = UNMutableNotificationContent()
@@ -65,45 +178,18 @@ class ObsidianBackend: JournalBackend {
     }
 
     private func todayDateString() -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
         return f.string(from: Date())
-    }
-
-    private func buildTemplate(dateStr: String) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        guard let date = f.date(from: dateStr) else { return "" }
-
-        let display = DateFormatter()
-        display.dateFormat = "EEEE, MMMM d, yyyy"
-
-        return """
-        ---
-        tags: []
-        ---
-        # \(display.string(from: date))
-
-        ## Tasks
-
-        ## Journal
-        ### Focus
-
-        ### Notes
-
-        ### End of Day
-        """
     }
 
     private func insertAfterHeader(content: String, header: String, newLine: String) -> String {
         var lines = content.components(separatedBy: "\n")
         guard let headerIdx = lines.firstIndex(where: { $0 == header }) else {
-            return content + "\n" + newLine
+            return content + "\n\n" + header + "\n" + newLine
         }
-
         var insertAt = lines.count
         for i in (headerIdx + 1)..<lines.count {
-            if lines[i].hasPrefix("## ") || lines[i].hasPrefix("### ") {
+            if lines[i].hasPrefix("## ") {
                 insertAt = i
                 while insertAt > headerIdx + 1 && lines[insertAt - 1].trimmingCharacters(in: .whitespaces).isEmpty {
                     insertAt -= 1
@@ -111,7 +197,6 @@ class ObsidianBackend: JournalBackend {
                 break
             }
         }
-
         lines.insert(newLine, at: insertAt)
         return lines.joined(separator: "\n")
     }
