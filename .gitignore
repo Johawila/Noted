@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# Xcode — build output
+build/
+DerivedData/
+*.app
+
+# Xcode — per-user state (never share)
+*.xcuserstate
+xcuserdata/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# Secrets / local config
+*.xcconfig.local
+.env
+*.secret
