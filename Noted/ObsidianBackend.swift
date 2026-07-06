@@ -58,7 +58,8 @@ class ObsidianBackend: JournalBackend {
         let fileURL = folder.appendingPathComponent("\(today).md")
 
         var content = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? dailyTemplate(today)
-        let line = type == .task ? "- [ ] \(wikified)" : "- \(wikified)"
+        // Notes carry a capture time so the day reads as an observed timeline; tasks stay bare.
+        let line = type == .task ? "- [ ] \(wikified)" : "- \(nowTimeString()) — \(wikified)"
         let header = type == .task ? "## Tasks" : "## Notes"
         content = insertAfterHeader(content: content, header: header, newLine: line)
         try content.write(to: fileURL, atomically: true, encoding: .utf8)
@@ -105,8 +106,14 @@ class ObsidianBackend: JournalBackend {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
         let display = DateFormatter(); display.dateFormat = "EEEE, MMMM d, yyyy"
         let title = f.date(from: dateStr).map { display.string(from: $0) } ?? dateStr
+        // Mirrors Meta/daily-template.md: the context strip sits BETWEEN the title and
+        // ## Tasks so appended notes (which go after the last header) land at file end.
         return """
         # \(title)
+
+        ```dataviewjs
+        await dv.view("Meta/daily");
+        ```
 
         ## Tasks
 
@@ -179,6 +186,11 @@ class ObsidianBackend: JournalBackend {
 
     private func todayDateString() -> String {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
+
+    private func nowTimeString() -> String {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"
         return f.string(from: Date())
     }
 

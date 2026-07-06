@@ -48,7 +48,23 @@ class ArticleFetcher {
         request.setValue("text/markdown", forHTTPHeaderField: "Accept")
         let (data, response) = try await URLSession.shared.data(for: request)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) { return "" }
-        return String(data: data, encoding: .utf8) ?? ""
+        return ArticleFetcher.stripJinaPreamble(String(data: data, encoding: .utf8) ?? "")
+    }
+
+    // Jina prepends "Title:", "URL Source:", "Published Time:" and a "Markdown Content:"
+    // marker before the article body — metadata we already keep in frontmatter. Drop it.
+    private static func stripJinaPreamble(_ markdown: String) -> String {
+        if let range = markdown.range(of: "Markdown Content:") {
+            return String(markdown[range.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        var lines = markdown.components(separatedBy: "\n")
+        let preamblePrefixes = ["Title:", "URL Source:", "Published Time:", "Warning:"]
+        while let first = lines.first,
+              first.trimmingCharacters(in: .whitespaces).isEmpty
+                || preamblePrefixes.contains(where: { first.hasPrefix($0) }) {
+            lines.removeFirst()
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func fetchRaw(_ url: URL) async throws -> String {
