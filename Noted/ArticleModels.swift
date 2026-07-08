@@ -35,3 +35,10 @@ struct ConceptMerge: Decodable {
     let conflict: String        // none | soft | scope | hard
     let conflictNote: String?
 }
+
+// A web-discovered related article worth queueing on the Reading List.
+struct RelatedSuggestion: Decodable {
+    let title: String
+    let url: String
+    let why: String             // one short line on why it's worth reading
+}

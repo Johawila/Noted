@@ -120,6 +120,43 @@ class ArticleAIService {
         return parsed
     }
 
+    // Phase 3 — discover related reading via the server-side web search tool.
+    // Returns 0–3 suggestions; empty on any parse hiccup (this feature is best-effort).
+    func suggestRelated(meta: ArticleMeta, knownTitles: [String]) async throws -> [RelatedSuggestion] {
+        guard !apiKey.isEmpty else { throw ArticleAIError.noApiKey }
+
+        let known = knownTitles.isEmpty
+            ? "(nothing yet)"
+            : knownTitles.prefix(60).map { "- \($0)" }.joined(separator: "\n")
+        let userMessage = """
+        I just read this article:
+        Title: \(meta.title)
+        Source: \(meta.source)
+        TL;DR: \(meta.tldr)
+        Topics: \(meta.topics.joined(separator: ", "))
+
+        Already in my library or reading queue — do NOT suggest these or near-duplicates:
+        \(known)
+
+        Search the web and pick the 0–3 related articles most worth my time.
+        """
+
+        let body: [String: Any] = [
+            "model": extractionModel,
+            "max_tokens": 2000,
+            "system": Self.relatedSystemPrompt,
+            "tools": [["type": "web_search_20260209", "name": "web_search", "max_uses": 3]],
+            "messages": [["role": "user", "content": userMessage]]
+        ]
+
+        let data = try await post(body)
+        let text = try Self.joinedText(in: data)
+        // The reply interleaves search blocks and prose; the JSON array is the contract.
+        guard let start = text.firstIndex(of: "["), let end = text.lastIndex(of: "]"), start < end else { return [] }
+        let json = String(text[start...end])
+        return (try? JSONDecoder().decode([RelatedSuggestion].self, from: Data(json.utf8))) ?? []
+    }
+
     // MARK: - Private
 
     private func post(_ body: [String: Any]) async throws -> Data {
@@ -147,6 +184,16 @@ class ArticleAIService {
             if let text = block["text"] as? String { return text }
         }
         throw ArticleAIError.badResponse
+    }
+
+    // With server tools in play the response interleaves text/search blocks — join all text.
+    private static func joinedText(in data: Data) throws -> String {
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let content = json?["content"] as? [[String: Any]] else { throw ArticleAIError.badResponse }
+        return content
+            .filter { $0["type"] as? String == "text" }
+            .compactMap { $0["text"] as? String }
+            .joined(separator: "\n")
     }
 
     private static let extractionSystemPrompt = """
@@ -200,6 +247,20 @@ class ArticleAIService {
 
     For a hard conflict, still return your best merged summary, but the caller will preserve both \
     claims rather than overwrite. Respond with ONLY the JSON.
+    """
+
+    private static let relatedSystemPrompt = """
+    You curate a discerning engineer's reading list. Given an article they just read, search \
+    the web for related pieces and select AT MOST 3 genuinely worth their time — substantive \
+    essays, respected engineering blogs, primary sources, or canonical references that deepen \
+    or challenge the article's ideas. Skip listicles, SEO content farms, aggregator pages, \
+    thin summaries, and anything already in their library. Selecting ZERO is a perfectly \
+    good outcome — only suggest what you'd stake your reputation on. Use ONLY URLs that \
+    appeared in your search results; never invent one.
+
+    Respond with ONLY a JSON array (no prose before or after):
+    [{"title": "...", "url": "https://...", "why": "one line, max 12 words"}]
+    Respond with [] if nothing clears the bar.
     """
 
     private static let mergeSchema: [String: Any] = [
