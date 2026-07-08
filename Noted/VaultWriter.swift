@@ -13,6 +13,8 @@ struct VaultWriteResult {
     let primaryConceptPath: String?
     let conceptCount: Int
     let conflictCount: Int
+    // Vault-relative ref to the raw article (no .md) — for [[wikilinks]] back to the source.
+    let rawArticleRef: String
 }
 
 // Writes an analyzed article into an Obsidian vault as a Karpathy-style wiki:
@@ -107,7 +109,9 @@ class VaultWriter {
         try appendLog(vault, primary: analysis.concepts.first?.name ?? analysis.article.title,
                       updated: updatedTitles, conflicts: conflictCount)
 
-        return VaultWriteResult(primaryConceptPath: primaryPath, conceptCount: analysis.concepts.count, conflictCount: conflictCount)
+        let rawRef = "Articles/\(articleTopicDir)/\(rawFileName.replacingOccurrences(of: ".md", with: ""))"
+        return VaultWriteResult(primaryConceptPath: primaryPath, conceptCount: analysis.concepts.count,
+                                conflictCount: conflictCount, rawArticleRef: rawRef)
     }
 
     // MARK: - Concept upsert
@@ -270,6 +274,112 @@ class VaultWriter {
             if let text = try? String(contentsOf: url, encoding: .utf8) { pages.append(ConceptPage(markdown: text)) }
         }
         return pages
+    }
+
+    // MARK: - Reading suggestions (web-discovered related articles)
+
+    // Titles the suggestion call should treat as "already have" — queue items + ingested articles.
+    func knownReadingTitles() -> [String] {
+        guard let vault = vaultURL else { return [] }
+        var titles: [String] = []
+        if let list = try? String(contentsOf: vault.appendingPathComponent("Reading List.md"), encoding: .utf8) {
+            for line in list.components(separatedBy: "\n") where line.hasPrefix("- [") {
+                let cleaned = line
+                    .replacingOccurrences(of: #"^- \[.\] "#, with: "", options: .regularExpression)
+                    .replacingOccurrences(of: #"\[([^\]]+)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
+                    .replacingOccurrences(of: "*", with: "")
+                    .trimmingCharacters(in: .whitespaces)
+                if !cleaned.isEmpty { titles.append(cleaned) }
+            }
+        }
+        if let walker = fm.enumerator(at: articlesDir(vault), includingPropertiesForKeys: nil) {
+            for case let url as URL in walker where url.pathExtension == "md" {
+                guard let head = try? String(contentsOf: url, encoding: .utf8).prefix(400) else { continue }
+                for line in head.components(separatedBy: "\n") where line.hasPrefix("title:") {
+                    let t = line.dropFirst("title:".count)
+                        .trimmingCharacters(in: CharacterSet(charactersIn: " \""))
+                    if !t.isEmpty { titles.append(t) }
+                }
+            }
+        }
+        return titles
+    }
+
+    // Queue suggestions under "## To read", skipping anything already present by URL or title.
+    // `viaRef` is the vault-relative ref of the source article, so "via" links back to it.
+    // Returns how many were actually added.
+    func appendReadingSuggestions(_ suggestions: [RelatedSuggestion], viaTitle: String, viaRef: String) throws -> Int {
+        guard let vault = vaultURL, !suggestions.isEmpty else { return 0 }
+        let fileURL = vault.appendingPathComponent("Reading List.md")
+        guard var content = try? String(contentsOf: fileURL, encoding: .utf8) else { return 0 }
+
+        let haystack = content.lowercased()
+        let knownURLs = existingSourceURLs()
+        var added = 0
+        for s in suggestions {
+            let url = s.url.trimmingCharacters(in: .whitespaces)
+            guard url.lowercased().hasPrefix("http") else { continue }
+            if haystack.contains(url.lowercased()) || haystack.contains(s.title.lowercased()) { continue }
+            if knownURLs.contains(url) { continue }
+            let line = "- [ ] [\(s.title)](\(url)) · via [[\(viaRef)|\(viaTitle)]] — \(s.why)"
+            content = insertAfterHeader(content: content, header: "## To read", newLine: line)
+            added += 1
+        }
+        if added > 0 { try content.write(to: fileURL, atomically: true, encoding: .utf8) }
+        return added
+    }
+
+    // The outbound half of the two-way link (the Reading List's "via" wikilink is the inbound
+    // half): append a clearly-marked "Suggested reading" section to the raw article. Raw
+    // articles are otherwise read-only; this is pipeline metadata, separated from the source
+    // text by a rule, written once at ingest and never edited afterwards.
+    func appendSuggestedReading(_ suggestions: [RelatedSuggestion], toArticleRef ref: String) throws {
+        guard let vault = vaultURL, !suggestions.isEmpty else { return }
+        let fileURL = vault.appendingPathComponent(ref + ".md")
+        guard var content = try? String(contentsOf: fileURL, encoding: .utf8),
+              !content.contains("## Suggested reading") else { return }
+
+        var section = "\n\n---\n\n## Suggested reading\n"
+        section += "_Auto-discovered when this article was ingested · queued on [[Reading List]]._\n\n"
+        for s in suggestions where s.url.lowercased().hasPrefix("http") {
+            section += "- [\(s.title)](\(s.url.trimmingCharacters(in: .whitespaces))) — \(s.why)\n"
+        }
+        content = content.trimmingCharacters(in: .whitespacesAndNewlines) + section
+        try content.write(to: fileURL, atomically: true, encoding: .utf8)
+    }
+
+    // source_url of every ingested article — don't re-suggest what's already in the library.
+    private func existingSourceURLs() -> Set<String> {
+        guard let vault = vaultURL,
+              let walker = fm.enumerator(at: articlesDir(vault), includingPropertiesForKeys: nil) else { return [] }
+        var urls = Set<String>()
+        for case let url as URL in walker where url.pathExtension == "md" {
+            guard let head = try? String(contentsOf: url, encoding: .utf8).prefix(400) else { continue }
+            for line in head.components(separatedBy: "\n") where line.hasPrefix("source_url:") {
+                urls.insert(line.dropFirst("source_url:".count).trimmingCharacters(in: .whitespaces))
+            }
+        }
+        return urls
+    }
+
+    // Insert a line at the end of a "## Header" section (before the next "## ").
+    private func insertAfterHeader(content: String, header: String, newLine: String) -> String {
+        var lines = content.components(separatedBy: "\n")
+        guard let headerIdx = lines.firstIndex(where: { $0 == header }) else {
+            return content + "\n\n" + header + "\n" + newLine
+        }
+        var insertAt = lines.count
+        for i in (headerIdx + 1)..<lines.count {
+            if lines[i].hasPrefix("## ") || lines[i].hasPrefix("---") {
+                insertAt = i
+                while insertAt > headerIdx + 1 && lines[insertAt - 1].trimmingCharacters(in: .whitespaces).isEmpty {
+                    insertAt -= 1
+                }
+                break
+            }
+        }
+        lines.insert(newLine, at: insertAt)
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Helpers

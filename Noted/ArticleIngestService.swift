@@ -61,6 +61,20 @@ class ArticleIngestService: ObservableObject {
 
             await progress?.update("Writing concept pages…")
             let result = try await writer.write(analysis: analysis, url: fetched.url, rawMarkdown: fetched.markdown)
+
+            // Best-effort: web-search for related reading and queue it. Never fails the ingest.
+            await progress?.update("Scouting related reading…")
+            var related = 0
+            if let suggestions = try? await ArticleAIService.shared.suggestRelated(
+                meta: analysis.article,
+                knownTitles: writer.knownReadingTitles() + [analysis.article.title]
+            ), !suggestions.isEmpty {
+                related = (try? writer.appendReadingSuggestions(
+                    suggestions, viaTitle: analysis.article.title, viaRef: result.rawArticleRef
+                )) ?? 0
+                // the article's own record of what it spawned — the other half of the link
+                try? writer.appendSuggestedReading(suggestions, toArticleRef: result.rawArticleRef)
+            }
             await progress?.finish()
 
             let pageURL = result.primaryConceptPath.map { URL(fileURLWithPath: $0).absoluteString }
@@ -69,9 +83,12 @@ class ArticleIngestService: ObservableObject {
             let conflictSuffix = result.conflictCount > 0
                 ? " · \(result.conflictCount) conflict\(result.conflictCount == 1 ? "" : "s") to review"
                 : ""
+            let readingSuffix = related > 0
+                ? " · \(related) reading suggestion\(related == 1 ? "" : "s")"
+                : ""
             await notify(
                 title: "Added to wiki",
-                body: "\(analysis.article.title) — \(result.conceptCount) concept\(result.conceptCount == 1 ? "" : "s")\(conflictSuffix)"
+                body: "\(analysis.article.title) — \(result.conceptCount) concept\(result.conceptCount == 1 ? "" : "s")\(conflictSuffix)\(readingSuffix)"
             )
         } catch {
             await progress?.fail(error.localizedDescription)
