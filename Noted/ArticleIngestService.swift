@@ -33,14 +33,8 @@ class ArticleIngestService: ObservableObject {
         if recent.count > 8 { recent.removeLast(recent.count - 8) }
         let id = item.id
 
-        let backend = UserDefaults.standard.string(forKey: "backendType") ?? BackendType.notion.rawValue
-        let useVault = backend == BackendType.obsidian.rawValue
         Task.detached {
-            if useVault {
-                await self.runVaultIngest(id: id, urlString: urlString)
-            } else {
-                await self.runNotionIngest(id: id, urlString: urlString)
-            }
+            await self.runVaultIngest(id: id, urlString: urlString)
         }
     }
 
@@ -97,51 +91,14 @@ class ArticleIngestService: ObservableObject {
         }
     }
 
-    // MARK: - Notion pipeline (legacy; used when the Notion backend is selected)
 
-    nonisolated private func runNotionIngest(id: UUID, urlString: String) async {
-        let writer = NotionArticleWriter.shared
-        var placeholder: ArticlePlaceholder?
-        do {
-            let created = try await writer.createPlaceholder(url: urlString)
-            placeholder = created
-            await setPageURL(id: id, pageURL: created.articleURL)
-
-            await writer.updateProgress(created, emoji: "⏳", "Fetching article…", fraction: 0.15)
-            let fetched = try await ArticleFetcher.shared.fetch(urlString: urlString)
-
-            await writer.updateProgress(created, emoji: "🧠", "Summarising with Claude…", fraction: 0.45)
-            let existing = try await writer.existingConceptNames()
-            let analysis = try await ArticleAIService.shared.analyze(
-                markdown: fetched.markdown, url: fetched.url, existingConcepts: existing
-            )
-
-            await writer.updateProgress(created, emoji: "🔗", "Building concept pages…", fraction: 0.8)
-            let result = try await writer.finalize(created, analysis: analysis, url: fetched.url)
-
-            await finish(id: id, title: analysis.article.title, status: .ready, pageURL: result.articlePageURL)
-            await notify(
-                title: "Article saved",
-                body: "\(analysis.article.title) — \(result.conceptCount) concept\(result.conceptCount == 1 ? "" : "s")"
-            )
-        } catch {
-            if let placeholder { await writer.markFailed(placeholder, message: error.localizedDescription) }
-            await finish(id: id, title: nil, status: .failed(error.localizedDescription), pageURL: placeholder?.articleURL)
-            await notify(title: "Article ingestion failed", body: error.localizedDescription)
-        }
-    }
-
+    // Open the finished wiki page if we have one, else the original article URL.
     func open(_ article: IngestedArticle) {
         let target = article.pageURL ?? article.url
         if let url = URL(string: target) { NSWorkspace.shared.open(url) }
     }
 
     // MARK: - Private
-
-    private func setPageURL(id: UUID, pageURL: String) {
-        guard let index = recent.firstIndex(where: { $0.id == id }) else { return }
-        recent[index].pageURL = pageURL
-    }
 
     private func finish(id: UUID, title: String?, status: IngestedArticle.Status, pageURL: String?) {
         guard let index = recent.firstIndex(where: { $0.id == id }) else { return }

@@ -142,7 +142,9 @@ class VaultWriter {
             if fileSafe(page.title) != canonical { page.addAlias(concept.name) }
 
             if let merge = try? await ArticleAIService.shared.mergeConcept(
-                concept: concept.name, existingSummary: page.summary, newContribution: concept.contribution
+                concept: concept.name, existingSummary: page.summary,
+                existingKeyPoints: page.keyPointTexts,
+                newContribution: concept.contribution, newKeyPoints: concept.keyPoints
             ) {
                 if merge.conflict == "hard" {
                     wasConflict = true
@@ -157,6 +159,12 @@ class VaultWriter {
                         page.summary += "\n\n> Tension: \(note)"
                     }
                 }
+                // Key points consolidate either way — a disputed summary doesn't invalidate
+                // the facts both sources agree on.
+                if !merge.keyPoints.isEmpty { page.setKeyPoints(merge.keyPoints) }
+            } else if page.keyPoints.isEmpty {
+                // Merge call failed: at least seed the page from this source.
+                page.setKeyPoints(concept.keyPoints)
             }
 
             page.addSourceBullet(sourceBullet)
@@ -171,7 +179,8 @@ class VaultWriter {
         let page = ConceptPage.new(
             topic: concept.topic, sourceLabel: sourceLabel, updated: today(),
             published: meta.publishedDate ?? "Unknown", title: canonical,
-            summary: concept.contribution, fromSources: [sourceBullet], seeAlso: seeAlsoLinks
+            summary: concept.contribution, keyPoints: concept.keyPoints,
+            fromSources: [sourceBullet], seeAlso: seeAlsoLinks
         )
         let fileURL = conceptsDir(vault).appendingPathComponent("\(topicDir)/\(canonical).md")
         try ensureDir(fileURL.deletingLastPathComponent())

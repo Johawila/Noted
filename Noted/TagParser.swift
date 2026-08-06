@@ -12,7 +12,7 @@ struct ParsedEntry {
     let projects: [String]
     let people: [String]
 
-    // Back-compat convenience for the single-tag (legacy Notion) path.
+    // Convenience for callers that only care about the first tag of each kind.
     var projectTag: String? { projects.first }
     var personTag: String? { people.first }
 }

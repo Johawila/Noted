@@ -64,44 +64,30 @@ class ArticleAIService {
         return parsed
     }
 
-    // Phase 2 — fold a new article's contribution into a concept's running summary.
-    func resynthesize(concept: String, existingSummary: String, newContribution: String) async throws -> String {
-        guard !apiKey.isEmpty else { throw ArticleAIError.noApiKey }
-
-        let userMessage = """
-        Concept: \(concept)
-
-        Current summary:
-        \(existingSummary)
-
-        New information from another article:
-        \(newContribution)
-        """
-
-        let body: [String: Any] = [
-            "model": synthesisModel,
-            "max_tokens": 600,
-            "system": Self.synthesisSystemPrompt,
-            "messages": [["role": "user", "content": userMessage]]
-        ]
-
-        let data = try await post(body)
-        return try Self.firstText(in: data).trimmingCharacters(in: .whitespacesAndNewlines)
-    }
 
     // Phase 2b — merge a new contribution into an existing concept's summary AND classify
     // whether it conflicts with the current understanding (none/soft/scope/hard).
-    func mergeConcept(concept: String, existingSummary: String, newContribution: String) async throws -> ConceptMerge {
+    func mergeConcept(concept: String, existingSummary: String, existingKeyPoints: [String],
+                      newContribution: String, newKeyPoints: [String]) async throws -> ConceptMerge {
         guard !apiKey.isEmpty else { throw ArticleAIError.noApiKey }
 
+        let bullets = { (list: [String]) in
+            list.isEmpty ? "(none)" : list.map { "- \($0)" }.joined(separator: "\n")
+        }
         let userMessage = """
         Concept: \(concept)
 
         Current summary:
         \(existingSummary)
 
+        Current key points:
+        \(bullets(existingKeyPoints))
+
         New information from another source:
         \(newContribution)
+
+        Key points the new source offers:
+        \(bullets(newKeyPoints))
         """
 
         let body: [String: Any] = [
@@ -214,6 +200,12 @@ class ArticleAIService {
     "Event Sourcing").
        - contribution: 1–3 sentences capturing specifically what THIS article says about the \
     concept — its angle, claims, or examples. Not a generic definition.
+       - keyPoints: 2–5 durable, self-contained facts about the concept, each one short enough \
+    to skim in a couple of seconds. These are what the reader will re-read months from now, so \
+    they must stand alone without the article for context: concrete mechanisms, thresholds, \
+    trade-offs, numbers, or rules of thumb. Prefer "Flags multiply test paths: 10 flags is 1024 \
+    states" over "Flags are useful but have downsides". Omit anything that is only true of this \
+    article's specific example.
        - topic: the single best-fit subject area for the concept, used as its wiki folder \
     (e.g. "Software Architecture", "Engineering Leadership", "AI & LLMs"). Reuse a consistent \
     set of broad topics rather than inventing a new one per concept.
@@ -223,27 +215,24 @@ class ArticleAIService {
     Prefer a handful of substantial concepts over many shallow ones.
     """
 
-    private static let synthesisSystemPrompt = """
-    You maintain the running summary of a single concept in a personal knowledge base. \
-    You receive the current summary and a new contribution drawn from another article. \
-    Rewrite the summary so it incorporates the new information: keep what still holds, fold in \
-    genuinely new angles, and stay tight (2–4 sentences). Write a clean definition-style summary \
-    of the concept itself — do not mention "the article" or attribution. Respond with ONLY the \
-    updated summary text, no preamble.
-    """
-
     private static let mergeSystemPrompt = """
     You maintain one concept's summary in a personal knowledge base. You receive the current \
     summary and a new contribution from another source. Do two things:
 
     1. summary: rewrite the concept's summary (2–4 sentences) to incorporate genuinely new angles \
     while keeping what still holds. Clean definition-style prose; don't mention "the article".
-    2. conflict: classify how the new information relates to the current summary:
+    2. keyPoints: return the CONSOLIDATED key-point list for the page — the existing points plus \
+    the new source's, merged. Drop true duplicates and fold near-duplicates into the single \
+    clearest phrasing (keep the more concrete one — the version with the mechanism, number, or \
+    threshold). Keep every point that carries distinct information, even if it complicates the \
+    picture. Aim for at most 8; if you must cut, cut the vaguest. Each point stays short and \
+    self-contained.
+    3. conflict: classify how the new information relates to the current summary:
        - "none": no tension; it just adds or refines.
        - "soft": minor tension or differing emphasis, reconcilable.
        - "scope": both true but in different contexts/conditions.
        - "hard": a direct factual contradiction — they cannot both be true as stated.
-    3. conflictNote: if conflict is not "none", one sentence naming the disagreement; otherwise null.
+    4. conflictNote: if conflict is not "none", one sentence naming the disagreement; otherwise null.
 
     For a hard conflict, still return your best merged summary, but the caller will preserve both \
     claims rather than overwrite. Respond with ONLY the JSON.
@@ -268,10 +257,11 @@ class ArticleAIService {
         "additionalProperties": false,
         "properties": [
             "summary": ["type": "string"],
+            "keyPoints": ["type": "array", "items": ["type": "string"]],
             "conflict": ["type": "string", "enum": ["none", "soft", "scope", "hard"]],
             "conflictNote": ["type": ["string", "null"]]
         ],
-        "required": ["summary", "conflict", "conflictNote"]
+        "required": ["summary", "keyPoints", "conflict", "conflictNote"]
     ]
 
     // Structured-output schema for the extraction call. All fields are required and
@@ -304,10 +294,11 @@ class ArticleAIService {
                         "name": ["type": "string"],
                         "existingMatch": ["type": ["string", "null"]],
                         "contribution": ["type": "string"],
+                        "keyPoints": ["type": "array", "items": ["type": "string"]],
                         "topic": ["type": "string"],
                         "relatedConcepts": ["type": "array", "items": ["type": "string"]]
                     ],
-                    "required": ["name", "existingMatch", "contribution", "topic", "relatedConcepts"]
+                    "required": ["name", "existingMatch", "contribution", "keyPoints", "topic", "relatedConcepts"]
                 ]
             ]
         ],

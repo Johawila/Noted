@@ -23,6 +23,8 @@ struct ConceptExtraction: Decodable {
     let existingMatch: String?
     // What THIS article says about the concept (1–3 sentences).
     let contribution: String
+    // Durable, self-contained facts about the concept — the skimmable layer of the page.
+    let keyPoints: [String]
     // Single best-fit topic for the concept's wiki directory (e.g. "Software Architecture").
     let topic: String
     let relatedConcepts: [String]
@@ -32,6 +34,9 @@ struct ConceptExtraction: Decodable {
 // classification of whether the new information conflicts with what's already there.
 struct ConceptMerge: Decodable {
     let summary: String
+    // The consolidated key-point list — existing points plus the new source's, deduped
+    // semantically by the model rather than by string equality.
+    let keyPoints: [String]
     let conflict: String        // none | soft | scope | hard
     let conflictNote: String?
 }

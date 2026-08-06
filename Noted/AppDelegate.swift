@@ -6,10 +6,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyManager: HotkeyManager!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if UserDefaults.standard.string(forKey: "backendType") == nil {
-            UserDefaults.standard.set(BackendType.notion.rawValue, forKey: "backendType")
-        }
-
         capturePanel = CapturePanel()
 
         hotkeyManager = HotkeyManager()
@@ -19,8 +15,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
-        if ObsidianBackend.shared.vaultPath.isEmpty &&
-           (BackendType(rawValue: UserDefaults.standard.string(forKey: "backendType") ?? "") ?? .obsidian) == .obsidian {
+        // No vault yet means nothing can be saved — open Settings so that's obvious.
+        if ObsidianBackend.shared.vaultPath.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 NSApp.activate(ignoringOtherApps: true)
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
