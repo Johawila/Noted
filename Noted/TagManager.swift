@@ -4,7 +4,7 @@ import Combine
 
 struct TagInfo: Equatable {
     let name: String
-    let color: String  // Notion palette name, e.g. "blue", "green", "" = none assigned
+    let color: String  // reserved for per-tag colouring; "" = none
 }
 
 class TagManager: ObservableObject {

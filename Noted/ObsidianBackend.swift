@@ -6,11 +6,9 @@ import UserNotifications
 //  - the day's note at Journal/YYYY-MM-DD.md (## Tasks / ## Notes)
 //  - #project → [[Project]], @person → [[Organisation/People/Name|Name]]
 //  - a capture tagged @person is ALSO copied onto that person's page (## Notes).
-class ObsidianBackend: JournalBackend {
+class ObsidianBackend {
     static let shared = ObsidianBackend()
     private init() {}
-
-    var displayName: String { "Obsidian" }
 
     var vaultPath: String {
         get { UserDefaults.standard.string(forKey: "vaultPath") ?? "" }

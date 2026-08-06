@@ -15,7 +15,6 @@ struct CaptureView: View {
 
     @State private var text = ""
     @AppStorage("lastUsedType") private var lastUsedTypeRaw = CaptureType.task.rawValue
-    @AppStorage("backendType") private var backendTypeRaw = BackendType.notion.rawValue
     @State private var type: CaptureType = .task
     @State private var savedType: CaptureType? = nil
     @FocusState private var isFocused: Bool
@@ -130,14 +129,6 @@ struct CaptureView: View {
                         .buttonStyle(.plain)
                     }
                 }
-
-                Text("·")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
-                    .padding(.leading, 4)
-                Text("→ \(BackendType(rawValue: backendTypeRaw)?.displayName ?? "Notion")")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
 
                 Spacer()
 

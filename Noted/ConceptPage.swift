@@ -77,7 +77,8 @@ struct ConceptPage {
     }
 
     static func new(topic: String, sourceLabel: String, updated: String, published: String,
-                    title: String, summary: String, fromSources: [String], seeAlso: [String]) -> ConceptPage {
+                    title: String, summary: String, keyPoints: [String],
+                    fromSources: [String], seeAlso: [String]) -> ConceptPage {
         var page = ConceptPage()
         page.topics = [topic]
         page.sources = sourceLabel
@@ -86,6 +87,7 @@ struct ConceptPage {
         page.status = "ok"
         page.title = title
         page.summary = summary
+        page.setKeyPoints(keyPoints)
         page.fromSources = fromSources
         page.seeAlso = seeAlso
         return page
@@ -103,6 +105,23 @@ struct ConceptPage {
 
     mutating func mergeTopics(_ newTopics: [String]) {
         for topic in newTopics where !topic.isEmpty && !topics.contains(topic) { topics.append(topic) }
+    }
+
+    // keyPoints is stored as raw markdown bullet lines (that's how it's parsed back),
+    // so plain sentences from the model get their "- " here rather than at every call site.
+    mutating func setKeyPoints(_ points: [String]) {
+        keyPoints = points
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .map { $0.hasPrefix("- ") ? $0 : "- \($0)" }
+    }
+
+    // The plain sentences, for handing back to the merge model.
+    var keyPointTexts: [String] {
+        keyPoints.map {
+            $0.trimmingCharacters(in: .whitespaces)
+              .replacingOccurrences(of: #"^[-*]\s+"#, with: "", options: .regularExpression)
+        }
     }
 
     mutating func addAlias(_ alias: String) {

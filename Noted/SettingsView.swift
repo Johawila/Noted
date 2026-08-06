@@ -3,57 +3,27 @@ import AppKit
 import ServiceManagement
 
 struct SettingsView: View {
-    @AppStorage("backendType") private var backendTypeRaw = BackendType.notion.rawValue
     @AppStorage("vaultPath") private var vaultPath = ""
     @AppStorage("hivemind.anthropicApiKey", store: .shared) private var anthropicApiKey = ""
     @State private var launchAtLogin = false
-    private var notionReady: Bool {
-        let hasKey = !(UserDefaults.shared.string(forKey: "notionApiKey") ?? "").isEmpty
-        let hasDb = !(UserDefaults.shared.string(forKey: "hivemind.dailyNotesDbId") ?? "").isEmpty
-        return hasKey && hasDb
-    }
-
-    private var backendType: BackendType {
-        BackendType(rawValue: backendTypeRaw) ?? .obsidian
-    }
 
     var body: some View {
         Form {
-            Section("Backend") {
-                Picker("Post entries to", selection: $backendTypeRaw) {
-                    Text("Obsidian").tag(BackendType.obsidian.rawValue)
-                    Text("Notion").tag(BackendType.notion.rawValue)
+            Section("Obsidian Vault") {
+                HStack {
+                    Text(vaultPath.isEmpty ? "No vault selected" : URL(fileURLWithPath: vaultPath).lastPathComponent)
+                        .foregroundStyle(vaultPath.isEmpty ? .secondary : .primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Button("Choose…") { chooseVault() }
                 }
-                .pickerStyle(.radioGroup)
-            }
-
-            if backendType == .obsidian {
-                Section("Obsidian Vault") {
-                    HStack {
-                        Text(vaultPath.isEmpty ? "No vault selected" : URL(fileURLWithPath: vaultPath).lastPathComponent)
-                            .foregroundStyle(vaultPath.isEmpty ? .secondary : .primary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer()
-                        Button("Choose…") { chooseVault() }
-                    }
-                    if !vaultPath.isEmpty {
-                        Text(vaultPath)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-            } else {
-                Section("Notion") {
-                    if notionReady {
-                        Label("Connected via Hivemind", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    } else {
-                        Label("Run workspace setup in Hivemind first", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                    }
+                if !vaultPath.isEmpty {
+                    Text(vaultPath)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
             }
 
