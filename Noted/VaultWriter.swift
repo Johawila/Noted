@@ -210,9 +210,14 @@ class VaultWriter {
         while fm.fileExists(atPath: dir.appendingPathComponent(fileName).path) {
             fileName = "\(base)-\(n).md"; n += 1
         }
+        // author/source are queryable fields, not entity pages: Dataview gives you
+        // "everything by X" for free without polluting Organisation/ (which means
+        // colleagues — role, manager, 1:1 log — not article bylines).
         let content = """
         ---
         title: \(yaml(meta.title))
+        author: \(yaml(meta.author ?? "Unknown"))
+        source: \(yaml(meta.source))
         source_url: \(url)
         collected: \(today())
         published: \(meta.publishedDate ?? "Unknown")
