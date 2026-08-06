@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import ServiceManagement
 
 struct SettingsView: View {
     @AppStorage("vaultPath") private var vaultPath = ""
@@ -37,7 +36,7 @@ struct SettingsView: View {
             Section("Startup") {
                 Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
-                Text("Requires the app to live in /Applications; the toggle reverts if the system declines (e.g. when run from Xcode).")
+                Text("Installs a LaunchAgent pointing at this copy of the app, so reinstalling doesn't drop it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -53,17 +52,16 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 400)
         .padding(.bottom)
-        .onAppear { launchAtLogin = SMAppService.mainApp.status == .enabled }
+        .onAppear { launchAtLogin = LoginItem.isEnabled }
     }
 
-    // Register/unregister the whole app as a macOS login item. Reverts the toggle to the
-    // real system state if the call fails (unregistered apps / running from Xcode throw).
+    // Reverts the toggle to the real on-disk state if writing the LaunchAgent fails, so the
+    // checkbox never claims something that isn't true.
     private func setLaunchAtLogin(_ enabled: Bool) {
         do {
-            if enabled { try SMAppService.mainApp.register() }
-            else { try SMAppService.mainApp.unregister() }
+            if enabled { try LoginItem.enable() } else { try LoginItem.disable() }
         } catch {
-            launchAtLogin = SMAppService.mainApp.status == .enabled
+            launchAtLogin = LoginItem.isEnabled
         }
     }
 
