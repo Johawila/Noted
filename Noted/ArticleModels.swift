@@ -47,3 +47,50 @@ struct RelatedSuggestion: Decodable {
     let url: String
     let why: String             // one short line on why it's worth reading
 }
+
+extension ArticleAnalysis {
+    /// Repairs blank names before they can reach the filesystem.
+    ///
+    /// The model occasionally returns an empty title or an unnamed concept — a PDF with no
+    /// obvious heading is enough to trigger it. Those blanks used to flow straight into
+    /// filename construction and produced an article called `2026-08-29-.md` alongside a
+    /// concept page named, literally, `.md`. Fixing it here means every downstream user
+    /// (filenames, frontmatter, the log, notifications) sees the same repaired value.
+    func normalized(url: String, markdown: String) -> ArticleAnalysis {
+        let trimmedTitle = article.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSource = article.source.trimmingCharacters(in: .whitespacesAndNewlines)
+        let host = URL(string: url)?.host ?? "Unknown source"
+
+        let repaired = ArticleMeta(
+            title: trimmedTitle.isEmpty ? Self.inferredTitle(markdown: markdown, host: host) : trimmedTitle,
+            source: trimmedSource.isEmpty ? host : trimmedSource,
+            author: article.author,
+            publishedDate: article.publishedDate,
+            readingMinutes: article.readingMinutes,
+            tldr: article.tldr,
+            keyTakeaways: article.keyTakeaways,
+            topics: article.topics
+        )
+
+        // An unnamed concept has nowhere to live — drop it rather than write an empty page.
+        let named = concepts.filter {
+            !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        return ArticleAnalysis(article: repaired, concepts: named)
+    }
+
+    // A document's first real line is nearly always its title, which beats any URL-derived
+    // guess — a Drive download link is just "uc?export=download&id=…".
+    private static func inferredTitle(markdown: String, host: String) -> String {
+        let candidate = markdown
+            .components(separatedBy: .newlines)
+            .lazy
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { line in
+                let bare = line.replacingOccurrences(of: "^#+\\s*", with: "", options: .regularExpression)
+                return bare.count >= 4 && bare.count <= 120 && bare.contains(where: { $0.isLetter })
+            }
+        guard let candidate else { return "Untitled — \(host)" }
+        return candidate.replacingOccurrences(of: "^#+\\s*", with: "", options: .regularExpression)
+    }
+}

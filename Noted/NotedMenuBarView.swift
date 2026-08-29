@@ -31,13 +31,21 @@ struct NotedMenuBarView: View {
     }
 
     private func label(for article: IngestedArticle) -> String {
-        let prefix: String
-        switch article.status {
-        case .processing: prefix = "⏳"
-        case .ready: prefix = "✓"
-        case .failed: prefix = "⚠️"
-        }
         let title = article.title.count > 40 ? String(article.title.prefix(40)) + "…" : article.title
-        return "\(prefix)  \(title)"
+        switch article.status {
+        case .processing:
+            // Menus can't host a ProgressView, so the bar is drawn with block characters.
+            return "\(bar(article.fraction))  \(Int(article.fraction * 100))%  \(article.phase)"
+        case .ready:
+            return "✓  \(title)"
+        case .failed:
+            return "⚠️  \(title)"
+        }
+    }
+
+    private func bar(_ fraction: Double) -> String {
+        let width = 10
+        let filled = Int((min(max(fraction, 0), 1) * Double(width)).rounded())
+        return String(repeating: "▓", count: filled) + String(repeating: "░", count: width - filled)
     }
 }
