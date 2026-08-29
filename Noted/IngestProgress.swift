@@ -67,20 +67,30 @@ actor IngestProgress {
 
     // MARK: - Private
 
-    // Rendered as HTML so the vault's noted-progress.css snippet can animate it. Without the
-    // snippet this still reads fine — the heading carries the percentage on its own.
+    // The bar's geometry is written as inline styles so the note renders correctly in any
+    // vault, with or without the noted-progress.css snippet installed — a note that depends on
+    // a stylesheet it can't guarantee just shows nothing. The snippet layers the animation on
+    // top (sheen, easing, the pulsing dots); the class names exist purely as its hooks.
     private func render() {
         let percent = Int(fraction * 100)
         let filled = Int((fraction * Double(Self.barWidth)).rounded())
         let asciiBar = String(repeating: "█", count: filled)
             + String(repeating: "░", count: Self.barWidth - filled)
 
+        let accent = "var(--sb-acc1, #514b82)"
+        let track = "position:relative;height:22px;border-radius:20px;border:2px solid;"
+            + "color:\(accent);overflow:hidden;background:var(--background-modifier-border)"
+        let fill = "position:absolute;margin:2px;inset:0 \(100 - percent)% 0 0;"
+            + "border-radius:20px;background:currentColor"
+        let meta = "display:flex;justify-content:space-between;margin-top:.6em;"
+            + "font-size:.85em;color:var(--text-muted)"
+
         let body = """
         # Ingesting… \(percent)%
 
         <div class="noted-ingest" style="--pct:\(percent)">
-        <div class="noted-ingest-track"><div class="noted-ingest-fill"></div></div>
-        <div class="noted-ingest-meta"><span class="noted-ingest-phase">\(phase)</span><span class="noted-ingest-pct">\(percent)%</span></div>
+        <div class="noted-ingest-track" style="\(track)"><div class="noted-ingest-fill" style="\(fill)"></div></div>
+        <div class="noted-ingest-meta" style="\(meta)"><span class="noted-ingest-phase">\(phase)</span><span class="noted-ingest-pct">\(percent)%</span></div>
         </div>
 
         > [!info]- Plain text version
