@@ -104,7 +104,7 @@ class ArticleFetcher {
     private static func pdfText(_ data: Data) -> String? {
         guard let document = PDFDocument(data: data), document.pageCount > 0 else { return nil }
         // A scanned PDF has pages but no text layer; the caller's prose check catches that.
-        return document.string
+        return PDFTextExtractor.markdown(from: document)
     }
 
     // MARK: - Quality gate

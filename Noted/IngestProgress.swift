@@ -8,10 +8,6 @@ actor IngestProgress {
     private let urlString: String
     private var phase: String = "Starting…"
     private var fraction: Double = 0
-    private var frame = 0
-    private var ticker: Task<Void, Never>?
-
-    private static let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     private static let barWidth = 24
     private static let notePrefix = "Ingesting — "
 
@@ -27,7 +23,7 @@ actor IngestProgress {
         let progress = IngestProgress(
             fileURL: vault.appendingPathComponent("\(notePrefix)\(host).md"), urlString: urlString
         )
-        Task { await progress.begin() }
+        Task { await progress.render() }
         return progress
     }
 
@@ -53,12 +49,10 @@ actor IngestProgress {
     }
 
     func finish() {
-        ticker?.cancel()
         try? FileManager.default.removeItem(at: fileURL)
     }
 
     func fail(_ message: String) {
-        ticker?.cancel()
         let body = """
         # ⚠️ Ingestion failed
 
@@ -73,35 +67,28 @@ actor IngestProgress {
 
     // MARK: - Private
 
-    private func begin() {
-        render()
-        ticker = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 400_000_000)
-                await self?.tick()
-            }
-        }
-    }
-
-    private func tick() {
-        frame = (frame + 1) % Self.frames.count
-        render()
-    }
-
+    // Rendered as HTML so the vault's noted-progress.css snippet can animate it. Without the
+    // snippet this still reads fine — the heading carries the percentage on its own.
     private func render() {
+        let percent = Int(fraction * 100)
         let filled = Int((fraction * Double(Self.barWidth)).rounded())
-        let bar = String(repeating: "█", count: filled)
+        let asciiBar = String(repeating: "█", count: filled)
             + String(repeating: "░", count: Self.barWidth - filled)
+
         let body = """
-        # \(Self.frames[frame]) Ingesting… \(Int(fraction * 100))%
+        # Ingesting… \(percent)%
 
-        `\(bar)`
+        <div class="noted-ingest" style="--pct:\(percent)">
+        <div class="noted-ingest-track"><div class="noted-ingest-fill"></div></div>
+        <div class="noted-ingest-meta"><span class="noted-ingest-phase">\(phase)</span><span class="noted-ingest-pct">\(percent)%</span></div>
+        </div>
 
-        **\(phase)**
+        > [!info]- Plain text version
+        > `\(asciiBar)` \(phase)
 
         \(urlString)
 
-        _This note disappears when the wiki finishes. Open it to watch progress._
+        _This note disappears when the wiki finishes._
         """
         try? body.write(to: fileURL, atomically: true, encoding: .utf8)
     }

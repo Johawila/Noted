@@ -30,6 +30,11 @@ class ArticleIngestService: ObservableObject {
 
     @Published private(set) var recent: [IngestedArticle] = []
 
+    // URLs currently being ingested. Holding Return in the capture bar repeats the key event,
+    // which used to start several ingests of the same link at once — each one burning an API
+    // call and posting its own notification.
+    private var inFlight: Set<String> = []
+
     // Stage boundaries as fractions of the whole job. The analyze call is the slowest leg by
     // far, and writing concepts is the only stage that can report genuine sub-progress.
     private enum Stage {
@@ -46,6 +51,9 @@ class ArticleIngestService: ObservableObject {
     }
 
     func ingest(urlString: String) {
+        guard !inFlight.contains(urlString) else { return }
+        inFlight.insert(urlString)
+
         let item = IngestedArticle(title: hostLabel(urlString), url: urlString, status: .processing)
         recent.insert(item, at: 0)
         if recent.count > 8 { recent.removeLast(recent.count - 8) }
@@ -143,6 +151,7 @@ class ArticleIngestService: ObservableObject {
 
     private func finish(id: UUID, title: String?, status: IngestedArticle.Status, pageURL: String?) {
         guard let index = recent.firstIndex(where: { $0.id == id }) else { return }
+        inFlight.remove(recent[index].url)
         if let title { recent[index].title = title }
         recent[index].status = status
         recent[index].pageURL = pageURL
