@@ -74,7 +74,10 @@ class VaultWriter {
         ["index", "log", "conflicts"].contains(stem.lowercased())
     }
 
-    func write(analysis: ArticleAnalysis, url: String, rawMarkdown: String) async throws -> VaultWriteResult {
+    // onConceptProgress reports (completed, total) after each concept page is written, so the
+    // caller can show real progress rather than a guess — this loop is the slow part.
+    func write(analysis: ArticleAnalysis, url: String, rawMarkdown: String,
+               onConceptProgress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> VaultWriteResult {
         guard let vault = vaultURL else { throw VaultWriteError.noVaultPath }
         try ensureScaffold(vault)
 
@@ -92,7 +95,9 @@ class VaultWriter {
         var conflictCount = 0
         var updatedTitles: [String] = []
 
-        for (index, concept) in analysis.concepts.enumerated() {
+        let writable = analysis.concepts.filter { !fileSafe($0.name).isEmpty }
+
+        for (index, concept) in writable.enumerated() {
             let topicDir = topicFolder(concept.topic.isEmpty ? "Uncategorised" : concept.topic)
             let result = try await upsertConcept(
                 vault: vault, concept: concept, topicDir: topicDir,
@@ -102,6 +107,7 @@ class VaultWriter {
             if result.wasConflict { conflictCount += 1 }
             if !result.wasNew { updatedTitles.append(concept.name) }
             if index == 0 { primaryPath = result.path }
+            onConceptProgress?(index + 1, writable.count)
         }
 
         try rebuildIndex(vault)
@@ -110,7 +116,7 @@ class VaultWriter {
                       updated: updatedTitles, conflicts: conflictCount)
 
         let rawRef = "Articles/\(articleTopicDir)/\(rawFileName.replacingOccurrences(of: ".md", with: ""))"
-        return VaultWriteResult(primaryConceptPath: primaryPath, conceptCount: analysis.concepts.count,
+        return VaultWriteResult(primaryConceptPath: primaryPath, conceptCount: writable.count,
                                 conflictCount: conflictCount, rawArticleRef: rawRef)
     }
 
@@ -213,7 +219,10 @@ class VaultWriter {
         let dir = articlesDir(vault).appendingPathComponent(topicDir)
         try ensureDir(dir)
         let datePrefix = (meta.publishedDate?.isEmpty == false ? meta.publishedDate! : today())
-        let base = "\(datePrefix)-\(slug(meta.title))"
+        // Last line of defence: ArticleAnalysis.normalized() should have filled the title in,
+        // but an empty slug here would silently create a file named "2026-08-29-.md".
+        let titleSlug = slug(meta.title)
+        let base = "\(datePrefix)-\(titleSlug.isEmpty ? "untitled" : titleSlug)"
         var fileName = "\(base).md"
         var n = 2
         while fm.fileExists(atPath: dir.appendingPathComponent(fileName).path) {

@@ -1,16 +1,19 @@
 import Foundation
 
-// A transient placeholder note at the vault root that animates a spinner while an article
-// is ingested, then deletes itself on success (or stays, with the error, on failure).
+// A transient placeholder note at the vault root showing a progress bar while an article is
+// ingested, then deleting itself on success (or staying, with the error, on failure).
 // Obsidian live-reloads the file as it changes on disk, so an open note actually animates.
 actor IngestProgress {
     private let fileURL: URL
     private let urlString: String
     private var phase: String = "Starting…"
+    private var fraction: Double = 0
     private var frame = 0
     private var ticker: Task<Void, Never>?
 
     private static let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    private static let barWidth = 24
+    private static let notePrefix = "Ingesting — "
 
     private static var vaultURL: URL? {
         let path = UserDefaults.standard.string(forKey: "vaultPath") ?? ""
@@ -21,9 +24,21 @@ actor IngestProgress {
     static func start(urlString: String) -> IngestProgress? {
         guard let vault = vaultURL else { return nil }
         let host = URL(string: urlString)?.host ?? "article"
-        let progress = IngestProgress(fileURL: vault.appendingPathComponent("Ingesting — \(host).md"), urlString: urlString)
+        let progress = IngestProgress(
+            fileURL: vault.appendingPathComponent("\(notePrefix)\(host).md"), urlString: urlString
+        )
         Task { await progress.begin() }
         return progress
+    }
+
+    // Quitting mid-ingest leaves the placeholder behind — it can only be cleaned up by whoever
+    // starts next, since no ingest can be in flight at launch.
+    static func clearStale() {
+        guard let vault = vaultURL,
+              let entries = try? FileManager.default.contentsOfDirectory(atPath: vault.path) else { return }
+        for name in entries where name.hasPrefix(notePrefix) && name.hasSuffix(".md") {
+            try? FileManager.default.removeItem(at: vault.appendingPathComponent(name))
+        }
     }
 
     private init(fileURL: URL, urlString: String) {
@@ -31,8 +46,9 @@ actor IngestProgress {
         self.urlString = urlString
     }
 
-    func update(_ phase: String) {
+    func update(_ phase: String, fraction: Double) {
         self.phase = phase
+        self.fraction = min(max(fraction, 0), 1)
         render()
     }
 
@@ -73,8 +89,13 @@ actor IngestProgress {
     }
 
     private func render() {
+        let filled = Int((fraction * Double(Self.barWidth)).rounded())
+        let bar = String(repeating: "█", count: filled)
+            + String(repeating: "░", count: Self.barWidth - filled)
         let body = """
-        # \(Self.frames[frame]) Ingesting…
+        # \(Self.frames[frame]) Ingesting… \(Int(fraction * 100))%
+
+        `\(bar)`
 
         **\(phase)**
 

@@ -15,6 +15,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
+        // Quitting mid-ingest strands the progress note in the vault. Nothing can be in flight
+        // at launch, so any note still sitting there is an orphan.
+        IngestProgress.clearStale()
+
         // No vault yet means nothing can be saved — open Settings so that's obvious.
         if ObsidianBackend.shared.vaultPath.isEmpty {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
