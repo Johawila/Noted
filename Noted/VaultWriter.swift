@@ -239,6 +239,7 @@ class VaultWriter {
         source_url: \(url)
         collected: \(today())
         published: \(meta.publishedDate ?? "Unknown")
+        read_time: \(ReadingTime.describe(markdown: rawMarkdown, fallbackMinutes: meta.readingMinutes))
         ---
 
         \(rawMarkdown)
