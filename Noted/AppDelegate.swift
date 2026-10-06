@@ -15,10 +15,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
-        // Picks up a session already running — the state file outlives the app, so quitting
-        // mid-pomodoro and relaunching resumes rather than restarts.
-        PomodoroTimer.shared.begin()
-
         // Quitting mid-ingest strands the progress note in the vault. Nothing can be in flight
         // at launch, so any note still sitting there is an orphan.
         IngestProgress.clearStale()

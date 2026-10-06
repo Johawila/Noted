@@ -4,7 +4,6 @@ import SwiftUI
 struct NotedApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @ObservedObject private var ingest = ArticleIngestService.shared
-    @ObservedObject private var pomodoro = PomodoroTimer.shared
 
     var body: some Scene {
         MenuBarExtra {
@@ -17,8 +16,6 @@ struct NotedApp: App {
             // without opening the menu at all.
             if let percent = ingest.activePercent {
                 Text("\(percent)%")
-            } else if let clock = pomodoro.menuBarTitle {
-                Text(clock)
             }
         }
 
