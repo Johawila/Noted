@@ -15,6 +15,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
+        // Mirrors the Obsidian plugin's pomodoro into the menu bar; read-only, so it is
+        // harmless when the plugin isn't installed.
+        PomodoroMirror.shared.begin()
+
         // Quitting mid-ingest strands the progress note in the vault. Nothing can be in flight
         // at launch, so any note still sitting there is an orphan.
         IngestProgress.clearStale()
