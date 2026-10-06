@@ -3,11 +3,18 @@ import SwiftUI
 struct NotedMenuBarView: View {
     let appDelegate: AppDelegate
     @ObservedObject private var ingest = ArticleIngestService.shared
+    @ObservedObject private var pomodoro = PomodoroTimer.shared
 
     var body: some View {
         Button("New entry  ⌘⇧Space") {
             appDelegate.toggleCapture()
         }
+
+        Divider()
+        Text("\(pomodoro.state.phase.label) · \(pomodoro.state.clock)")
+        Button(pomodoro.state.isRunning ? "Pause" : "Start") { pomodoro.toggle() }
+        Button("Reset") { pomodoro.reset() }
+        Button("Skip") { pomodoro.skip() }
 
         if !ingest.recent.isEmpty {
             Divider()
